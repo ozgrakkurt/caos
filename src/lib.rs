@@ -7,6 +7,36 @@ use std::{
     },
 };
 
+pub struct Iter<T: Copy + 'static> {
+    _guard: Arc<DropGuard>,
+    inner: core::slice::Iter<'static, T>,
+    next: *const Segment,
+}
+
+impl<T: Copy + 'static> Iterator for Iter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(v) = self.inner.next() {
+            return Some(*v);
+        }
+
+        if self.next.is_null() {
+            return None;
+        }
+
+        unsafe {
+            let r = &*self.next;
+            let s = core::slice::from_raw_parts(r.values as *const T, r.len.load(Ordering::SeqCst));
+            self.inner = s.iter();
+            let r = &*self.next;
+            self.next = r.next.load(Ordering::SeqCst);
+        }
+
+        self.inner.next().cloned()
+    }
+}
+
 #[derive(Clone)]
 pub struct Reader<T: Copy> {
     _guard: Arc<DropGuard>,
@@ -15,7 +45,43 @@ pub struct Reader<T: Copy> {
     _phantom: PhantomData<T>,
 }
 
-impl<T: Copy + PartialOrd + core::fmt::Debug> Reader<T> {
+impl<T: Copy + PartialOrd + Ord + core::fmt::Debug> Reader<T> {
+    pub fn iter_from(&self, index: usize) -> Iter<T> {
+        let mut segment = self.first_segment;
+        let mut offset = index;
+        for _ in 0..index / self.segment_length {
+            unsafe {
+                let r = &*segment;
+                segment = r.next.load(Ordering::SeqCst);
+            }
+
+            if segment.is_null() {
+                return Iter {
+                    _guard: self._guard.clone(),
+                    inner: [].iter(),
+                    next: core::ptr::null(),
+                };
+            }
+
+            offset -= self.segment_length;
+        }
+
+        unsafe {
+            let segment = &*segment;
+            let len = segment.len.load(Ordering::SeqCst);
+            let offset = core::cmp::min(offset, len);
+            let inner =
+                core::slice::from_raw_parts((segment.values as *const T).add(offset), len - offset);
+            let inner = inner.iter();
+
+            Iter {
+                _guard: self._guard.clone(),
+                inner,
+                next: segment.next.load(Ordering::SeqCst),
+            }
+        }
+    }
+
     pub fn position(&self, key: T) -> Option<usize> {
         unsafe {
             let mut segment = self.first_segment;
@@ -36,7 +102,7 @@ impl<T: Copy + PartialOrd + core::fmt::Debug> Reader<T> {
                     if key < first {
                         return None;
                     }
-                    return values.iter().position(|&v| v == key).map(|p| p + offset);
+                    return values.binary_search(&key).ok().map(|p| p + offset);
                 }
             }
 
@@ -182,6 +248,10 @@ mod tests {
         for val in values {
             assert_eq!(reader.position(val), Some(val), "{} failed", val);
         }
+
+        for (i, val) in reader.iter_from(4).enumerate() {
+            assert_eq!(val, i + 4, "failed at {}", i);
+        }
     }
 
     #[test]
@@ -193,6 +263,10 @@ mod tests {
         for &val in values.iter() {
             writer.append(&[val]);
             assert_eq!(reader.position(val), Some(val), "{} failed", val);
+        }
+
+        for (i, val) in reader.iter_from(33).enumerate() {
+            assert_eq!(val, i + 33);
         }
     }
 
@@ -208,6 +282,10 @@ mod tests {
 
         for val in values {
             assert_eq!(reader.position(val), Some(val), "{} failed", val);
+        }
+
+        for (i, val) in reader.iter_from(31).enumerate() {
+            assert_eq!(val, i + 31);
         }
     }
 }
