@@ -82,6 +82,46 @@ impl<T: Copy + PartialOrd + Ord + core::fmt::Debug> Reader<T> {
         }
     }
 
+    /// Returns the position of the given key or returns the position
+    /// of the first key that is greater than the given key
+    pub fn position_or_next(&self, key: T) -> Option<usize> {
+        unsafe {
+            let mut segment = self.first_segment;
+            let mut offset = 0;
+            while !segment.is_null() {
+                let r = &*segment;
+                let values = core::slice::from_raw_parts::<T>(
+                    r.values as *const T,
+                    r.len.load(Ordering::SeqCst),
+                );
+
+                let last = *values.last()?;
+                if last < key {
+                    segment = r.next.load(Ordering::SeqCst);
+                    offset += self.segment_length;
+                } else {
+                    let first = *values.get_unchecked(0);
+                    if key < first {
+                        return None;
+                    }
+
+                    // TODO: can implement this more efficiently by
+                    // implementing a binary search that does this.
+                    // Stdlib implementation of binary search doesn't do this
+                    for (pos, &val) in values.iter().enumerate() {
+                        if val >= key {
+                            return Some(pos + offset);
+                        }
+                    }
+
+                    return None;
+                }
+            }
+
+            None
+        }
+    }
+
     pub fn position(&self, key: T) -> Option<usize> {
         unsafe {
             let mut segment = self.first_segment;
