@@ -45,7 +45,7 @@ pub struct Reader<T: Copy> {
     _phantom: PhantomData<T>,
 }
 
-impl<T: Copy + PartialOrd + Ord + core::fmt::Debug> Reader<T> {
+impl<T: Copy> Reader<T> {
     pub fn iter_from(&self, index: usize) -> Iter<T> {
         let mut segment = self.first_segment;
         let mut offset = index;
@@ -81,7 +81,9 @@ impl<T: Copy + PartialOrd + Ord + core::fmt::Debug> Reader<T> {
             }
         }
     }
+}
 
+impl<T: Copy + PartialOrd + Ord> Reader<T> {
     /// Returns the position of the given key or returns the position
     /// of the first key that is greater than the given key
     pub fn position_or_next(&self, key: T) -> Option<usize> {
@@ -100,11 +102,6 @@ impl<T: Copy + PartialOrd + Ord + core::fmt::Debug> Reader<T> {
                     segment = r.next.load(Ordering::SeqCst);
                     offset += self.segment_length;
                 } else {
-                    let first = *values.get_unchecked(0);
-                    if key < first {
-                        return None;
-                    }
-
                     // TODO: can implement this more efficiently by
                     // implementing a binary search that does this.
                     // Stdlib implementation of binary search doesn't do this
@@ -277,6 +274,26 @@ const ALIGNMENT: usize = 64;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_position_or_next() {
+        let (mut writer, reader) = new::<usize>(3);
+
+        let values = (0..40).step_by(13).collect::<Vec<usize>>();
+        writer.append(&values);
+        // 0, 13, 26, 39
+
+        assert_eq!(reader.position_or_next(0).unwrap(), 0);
+        assert_eq!(reader.position_or_next(8).unwrap(), 1);
+        assert_eq!(reader.position_or_next(12).unwrap(), 1);
+        assert_eq!(reader.position_or_next(13).unwrap(), 1);
+        assert_eq!(reader.position_or_next(22).unwrap(), 2);
+        assert_eq!(reader.position_or_next(23).unwrap(), 2);
+        assert_eq!(reader.position_or_next(26).unwrap(), 2);
+        assert_eq!(reader.position_or_next(30).unwrap(), 3);
+        assert_eq!(reader.position_or_next(39).unwrap(), 3);
+        assert!(reader.position_or_next(40).is_none());
+    }
 
     #[test]
     fn smoke() {
