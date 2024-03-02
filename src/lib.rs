@@ -84,9 +84,8 @@ impl<T: Copy> Reader<T> {
 }
 
 impl<T: Copy + PartialOrd + Ord> Reader<T> {
-    /// Returns the position of the given key or returns the position
-    /// of the first key that is greater than the given key
-    pub fn position_or_next(&self, key: T) -> Option<usize> {
+    /// Returns the position the first key that is greater than the given key
+    pub fn next_position(&self, key: T) -> Option<usize> {
         unsafe {
             let mut segment = self.first_segment;
             let mut offset = 0;
@@ -98,7 +97,7 @@ impl<T: Copy + PartialOrd + Ord> Reader<T> {
                 );
 
                 let last = *values.last()?;
-                if last < key {
+                if last <= key {
                     segment = r.next.load(Ordering::SeqCst);
                     offset += self.segment_length;
                 } else {
@@ -106,7 +105,7 @@ impl<T: Copy + PartialOrd + Ord> Reader<T> {
                     // implementing a binary search that does this.
                     // Stdlib implementation of binary search doesn't do this
                     for (pos, &val) in values.iter().enumerate() {
-                        if val >= key {
+                        if val > key {
                             return Some(pos + offset);
                         }
                     }
@@ -276,23 +275,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_position_or_next() {
+    fn test_next_position() {
         let (mut writer, reader) = new::<usize>(3);
 
         let values = (0..40).step_by(13).collect::<Vec<usize>>();
         writer.append(&values);
         // 0, 13, 26, 39
 
-        assert_eq!(reader.position_or_next(0).unwrap(), 0);
-        assert_eq!(reader.position_or_next(8).unwrap(), 1);
-        assert_eq!(reader.position_or_next(12).unwrap(), 1);
-        assert_eq!(reader.position_or_next(13).unwrap(), 1);
-        assert_eq!(reader.position_or_next(22).unwrap(), 2);
-        assert_eq!(reader.position_or_next(23).unwrap(), 2);
-        assert_eq!(reader.position_or_next(26).unwrap(), 2);
-        assert_eq!(reader.position_or_next(30).unwrap(), 3);
-        assert_eq!(reader.position_or_next(39).unwrap(), 3);
-        assert!(reader.position_or_next(40).is_none());
+        assert_eq!(reader.next_position(0).unwrap(), 1);
+        assert_eq!(reader.next_position(8).unwrap(), 1);
+        assert_eq!(reader.next_position(12).unwrap(), 1);
+        assert_eq!(reader.next_position(13).unwrap(), 2);
+        assert_eq!(reader.next_position(22).unwrap(), 2);
+        assert_eq!(reader.next_position(23).unwrap(), 2);
+        assert_eq!(reader.next_position(26).unwrap(), 3);
+        assert_eq!(reader.next_position(30).unwrap(), 3);
+        assert!(reader.next_position(39).is_none());
+        assert!(reader.next_position(40).is_none());
     }
 
     #[test]
