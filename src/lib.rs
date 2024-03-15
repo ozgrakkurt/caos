@@ -13,6 +13,9 @@ pub struct Iter<T: Copy + 'static> {
     next: *const Segment,
 }
 
+unsafe impl<T: Send + Copy + 'static> Send for Iter<T> {}
+unsafe impl<T: Sync + Copy + 'static> Sync for Iter<T> {}
+
 impl<T: Copy + 'static> Iterator for Iter<T> {
     type Item = T;
 
@@ -44,6 +47,9 @@ pub struct Reader<T: Copy> {
     segment_length: usize,
     _phantom: PhantomData<T>,
 }
+
+unsafe impl<T: Sync + Copy + 'static> Sync for Reader<T> {}
+unsafe impl<T: Send + Copy + 'static> Send for Reader<T> {}
 
 impl<T: Copy> Reader<T> {
     pub fn iter_from(&self, index: usize) -> Iter<T> {
@@ -155,6 +161,9 @@ pub struct Writer<T: Copy> {
     _phantom: PhantomData<T>,
 }
 
+unsafe impl<T: Sync + Copy + 'static> Sync for Writer<T> {}
+unsafe impl<T: Send + Copy + 'static> Send for Writer<T> {}
+
 impl<T: Copy> Writer<T> {
     pub fn append(&mut self, values: &[T]) {
         unsafe {
@@ -190,6 +199,9 @@ struct Segment {
     len: AtomicUsize,
     next: AtomicPtr<Segment>,
 }
+
+unsafe impl Send for Segment {}
+unsafe impl Sync for Segment {}
 
 impl Segment {
     unsafe fn alloc(layout: Layout) -> *mut Self {
