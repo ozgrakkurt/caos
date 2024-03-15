@@ -52,6 +52,27 @@ unsafe impl<T: Sync + Copy + 'static> Sync for Reader<T> {}
 unsafe impl<T: Send + Copy + 'static> Send for Reader<T> {}
 
 impl<T: Copy> Reader<T> {
+    pub fn last(&self) -> Option<T> {
+        let mut segment = self.first_segment;
+
+        loop {
+            unsafe {
+                let r = &*segment;
+                let next = r.next.load(Ordering::SeqCst);
+
+                if next.is_null() {
+                    let inner = core::slice::from_raw_parts(
+                        r.values as *const T,
+                        r.len.load(Ordering::SeqCst),
+                    );
+                    return inner.last().copied();
+                }
+
+                segment = next;
+            }
+        }
+    }
+
     pub fn iter_from(&self, index: usize) -> Iter<T> {
         let mut segment = self.first_segment;
         let mut offset = index;
@@ -326,11 +347,14 @@ mod tests {
     fn smoke_one_by_one() {
         let (mut writer, reader) = new::<usize>(33);
 
+        assert_eq!(reader.last(), None);
+
         let values = (0..1131).collect::<Vec<usize>>();
 
         for &val in values.iter() {
             writer.append(&[val]);
             assert_eq!(reader.position(val), Some(val), "{} failed", val);
+            assert_eq!(reader.last(), Some(val));
         }
 
         for (i, val) in reader.iter_from(33).enumerate() {
